@@ -1,2 +1,2 @@
 nslookup
-smbclient
+python-ldap
