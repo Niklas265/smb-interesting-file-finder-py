@@ -2,12 +2,17 @@ import ldap
 from nslookup import Nslookup
 from impacket.smbconnection import SMBConnection
 from impacket import smb
+from impacket.smbconnection import SMB2_DIALECT_002
+from impacket.examples.smbclient import MiniImpacketShell
+import ntpath
 
-basedn="xxxxxx"
-dc_ip = "xxxx"
-username = "xxx"
+basedn="xxxxx"
+dc_ip = "xxxxx"
+username = "xxxxx"
 domain = "xxxxx"
 password = "xxxxxx"
+
+searchList = ["password","admin","config"]
 
 def connect_ldap(ldapServer: str, user: str,password: str):
     ldap_con = ldap.initialize(ldapServer)
@@ -45,10 +50,12 @@ def resolve_hostname(dns_server: str,host: str, domain: str):
 
 def connect_smb(ip:str):
     try:
-        smbClient = SMBConnection(ip,ip)
+        smbClient = SMBConnection(ip,ip,sess_port=445,preferredDialect=None)
+        print(smbClient.getDialect())
         smbClient.login(username,password,domain,'','')
         return smbClient
     except:
+        print("Connection Error")
         return None
 
 def get_smb_share_list(con):
@@ -61,10 +68,27 @@ def get_smb_share_list(con):
         pass
     return ret
 
+def eval_filename(filename):
+    for i in searchList:
+        if i in filename:
+            print(filename)
+            return True
+    return False
 
-def recurse_share(con,sharename):
+def recurse_share(con,sharename,directory):
     try:
-        print(con.listPath(sharename,'\\'))
+        files = con.listPath(sharename,directory)
+        for i in files:
+            try:
+                if i.is_directory() and i.get_shortname() != "." and i.get_shortname() != "..":
+                    #print(i.get_shortname())
+                    new_dir = directory[:-1]
+                    recurse_share(con,sharename,directory[:-1]+i.get_shortname()+"/*")
+                elif not i.is_directory():
+                    if eval_filename(i.get_shortname()):
+                        print(f"//{con.getRemoteHost()}/{sharename}/{directory[:-1]}{i.get_shortname()}")
+            except:
+                pass
     except smb.SessionError as e:
         print(e)
 
@@ -75,8 +99,13 @@ def traverse_shares(share_list,con):
         if share.lower() != 'admin$' and share.lower() != 'sysvol' and share.lower() != 'ipc$':
             try:
                 print(share)
-                share_con = con.connectTree(share) 
-                recurse_share(share_con,share)
+                #shell = MiniImpacketShell(con)
+                #shell.onecmd(f"use {share}")
+                #shell.onecmd("ls")
+                #continue
+                share_con = con.connectTree(share)
+                print(share_con)
+                recurse_share(con,str(share),"*")
             except:
                 print("Error")
 
