@@ -1,5 +1,7 @@
 # smb-interesting-file-finder-py
+Python AD enumeration tool to find accessible files on all readable SMB shares of the domain.
 
+Inspired by Find-InterestingDomainShareFiles from PowerView
 ```
 $ python smbinterestingfilefinder.py -h                                                                                                                                                                                                  
 usage: smbinterestingfilefinder.py [-h] -n DC_IP -u USERNAME -p PASSWORD -d DOMAIN -s SEARCH [-f FILTER] [-o OUTPUT] [-t DELAY]
