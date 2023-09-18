@@ -1,7 +1,9 @@
 import os
 import time
-import ldap
 from nslookup import Nslookup
+from impacket.ldap.ldap import LDAPConnection
+from impacket.ldap.ldap import LDAPSessionError
+from impacket.ldap.ldapasn1 import SearchResultEntry
 from impacket.smbconnection import SMBConnection
 from impacket import smb
 from impacket.smbconnection import SMB2_DIALECT_002
@@ -40,29 +42,32 @@ def open_output_file(path:str):
     else:
         return open(path,"w+")
 
-def connect_ldap(ldapServer: str, user: str,password: str):
-    ldap_con = ldap.initialize(ldapServer)
-    ldap_con.set_option(ldap.OPT_REFERRALS,0)
+def connect_ldap(ldapServer: str, user: str,password: str, domain: str, base_dn:str):
     try:
-        ldap_con.protocol_version = ldap.VERSION3
-        ldap_con.simple_bind_s(user,password)
-        print(f'[+] Successfull bind! as {ldap_con.whoami_s()}')
+        ldap_con = LDAPConnection(ldapServer,baseDN=base_dn)
+        ldap_con.login(user,password,domain,'','')
+        print(f'[+] Successfull LDAP bind!')
         return ldap_con
-    except ldap.INVALID_CREDENTIALS:
+    except OSError:
+        print('[-] No route to host!')
+        return None
+    except LDAPSessionError:
         print("[-] Invalid credentials!")
         return None
 
 def ldap_query(ldap_connection, base_dn:str, search_filter:str):
-    gid = ldap_connection.search(base_dn,ldap.SCOPE_SUBTREE,search_filter)
-    result_type,result = ldap_connection.result(gid)
+    result = ldap_connection.search(searchFilter=search_filter,attributes=['name'])
     return result
 
 def parse_computers(ldap_result):
     ret = []
     for computer in ldap_result:
-        dn,attributes = computer
-        if dn != None:
-            ret.append(attributes["name"][0].decode())
+        if isinstance(computer,SearchResultEntry) is not True:
+            continue
+        for attribute in computer['attributes']:
+            if str(attribute['type']) == 'name':
+                name = str(attribute['vals'][0])
+                ret.append(name)
     return ret
 
 def resolve_hostname(dns_server: str,host: str, domain: str):
@@ -134,6 +139,7 @@ def traverse_shares(share_list,con,keywords,output):
             except:
                 print("[-] Error while accessing share (e.g. insufficient permissions)")
 
+
 def main():
     parser = argparse.ArgumentParser(description="Tool to find interesting files, that are accessible on shares inside a domain")
     parser.add_argument('-n','--dc-ip', action='store', type=str, help='IP of Domain Controller', required=True)
@@ -158,7 +164,7 @@ def main():
         print("[-] Empty list of searchterms or unable to read searchterm file")
         return
 
-    connection = connect_ldap(f"ldap://{dc_ip}",f"{username}@{domain}",password)
+    connection = connect_ldap(f"ldap://{dc_ip}",username,password,domain,basedn)
     if not connection:
         return
 
