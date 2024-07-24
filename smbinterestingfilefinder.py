@@ -5,6 +5,7 @@ from impacket.ldap.ldap import LDAPConnection
 from impacket.ldap.ldap import LDAPSessionError
 from impacket.ldap.ldapasn1 import SearchResultEntry
 from impacket.smbconnection import SMBConnection
+from impacket.ldap import ldap
 from impacket import smb
 from impacket.smbconnection import SMB2_DIALECT_002
 from impacket.examples.smbclient import MiniImpacketShell
@@ -56,7 +57,8 @@ def connect_ldap(ldapServer: str, user: str,password: str, domain: str, base_dn:
         return None
 
 def ldap_query(ldap_connection, base_dn:str, search_filter:str):
-    result = ldap_connection.search(searchFilter=search_filter,attributes=['name'])
+    sc = ldap.SimplePagedResultsControl(size=100)
+    result = ldap_connection.search(searchFilter=search_filter,attributes=['name'],searchControls=[sc])
     return result
 
 def parse_computers(ldap_result):
