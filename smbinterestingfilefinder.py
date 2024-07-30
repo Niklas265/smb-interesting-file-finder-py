@@ -1,18 +1,23 @@
 import os
+import signal
 import time
 from nslookup import Nslookup
 from impacket.ldap.ldap import LDAPConnection
 from impacket.ldap.ldap import LDAPSessionError
 from impacket.ldap.ldapasn1 import SearchResultEntry
+from impacket.ldap.ldapasn1 import SimplePagedResultsControl
 from impacket.smbconnection import SMBConnection
-from impacket.ldap import ldap
 from impacket import smb
 from impacket.smbconnection import SMB2_DIALECT_002
 from impacket.examples.smbclient import MiniImpacketShell
 import ntpath
 import argparse
 
-def parseDN(domainname:str):
+def signal_handler(signal, frame):
+    print("\n[+] Received SIGINT, exiting...")
+    os._exit(1)
+
+def parse_dn(domainname:str):
     dn = ""
     first = True
     for i in domainname.split("."):
@@ -22,7 +27,7 @@ def parseDN(domainname:str):
         first = False
     return dn
 
-def parseSearchList(path:str):
+def parse_search_list(path:str):
     try:
         search_terms = []
         if os.path.exists(path) and os.path.isfile(path):
@@ -30,15 +35,16 @@ def parseSearchList(path:str):
             if file.readable():
                 lines = file.readlines()
                 for line in lines:
-                    search_terms.append(line[:-1])
+                    #search_terms.append(line[:-1].encode('utf-8'))
+                    search_terms.append(line.rstrip().lstrip().replace(" ", "").replace("-", "").replace("_", "").lower().encode('utf-8'))
                 return search_terms
         return []
     except:
         return []
 
-def open_output_file(path:str):
+def open_output_file(path:str, output_type:str):
     if os.path.exists(path):
-        print("[-] File for output already exists")
+        print("[-] File for " + output_type + " already exists")
         return None
     else:
         return open(path,"w+")
@@ -57,8 +63,8 @@ def connect_ldap(ldapServer: str, user: str,password: str, domain: str, base_dn:
         return None
 
 def ldap_query(ldap_connection, base_dn:str, search_filter:str):
-    sc = ldap.SimplePagedResultsControl(size=100)
-    result = ldap_connection.search(searchFilter=search_filter,attributes=['name'],searchControls=[sc])
+    paged_search_control = SimplePagedResultsControl(critical=True, size=1000)
+    result = ldap_connection.search(searchFilter=search_filter,attributes=['name'], searchControls=[paged_search_control])
     return result
 
 def parse_computers(ldap_result):
@@ -102,7 +108,12 @@ def get_smb_share_list(con):
 
 def eval_filename(filename,keywords):
     for i in keywords:
-        if i in filename:
+        #fn = re.sub(r"[ -_|/+=]", "", filename).lower().encode('utf-8')
+        #fn = filename.lower().encode('utf-8')
+        fn = filename.rstrip().lstrip().replace("+", "").replace("=", "").replace(".", "").replace("\\", "").replace(" ", "").replace("-", "").replace("_", "").lower().encode('utf-8')
+        if i in fn:
+            print("DEBUG")
+            print(i)
             return True
     return False
 
@@ -117,6 +128,7 @@ def recurse_share(con,sharename,directory,keywords,output):
                 elif not i.is_directory():
                     if eval_filename(i.get_longname(),keywords):
                         full_path = f"//{con.getRemoteHost()}/{sharename}/{directory[:-1]}{i.get_longname()}"
+                        full_path = full_path.replace("/", "\\")
                         print(full_path)
                         if output != None:
                             output.write(f"{full_path}\n")
@@ -152,6 +164,7 @@ def main():
 
     parser.add_argument('-f','--filter', action='store', type=str, help="Regex LDAP-Filter for specific computer objects, such as *dc*", required=False)
     parser.add_argument('-o','--output', action='store', type=str, help="Output file", required=False)
+    parser.add_argument('-c','--outputcomputers', action='store', type=str, help="Output file to write all retrieved computers are being searched", required=False)
     parser.add_argument('-t','--delay', action='store', type=int, help="Delay between SMB-Servers, required=false")
     arguments = parser.parse_args()
     
@@ -159,8 +172,10 @@ def main():
     username = arguments.username
     password = arguments.password
     domain = arguments.domain
-    basedn = parseDN(domain)
-    keywords = parseSearchList(arguments.search)
+    basedn = parse_dn(domain)
+    keywords = parse_search_list(arguments.search)
+
+    signal.signal(signal.SIGINT, signal_handler)
     
     if len(keywords) == 0:
         print("[-] Empty list of searchterms or unable to read searchterm file")
@@ -174,10 +189,10 @@ def main():
     if arguments.filter:
         ldap_filter = f"(&{ldap_filter}(name={arguments.filter}))"
     
-    outputFile = None
+    output_file = None
     if arguments.output:
-        outputFile = open_output_file(arguments.output)
-        if outputFile is None:
+        output_file = open_output_file(arguments.output, "output")
+        if output_file is None:
             return
 
     delay = -1
@@ -188,6 +203,14 @@ def main():
     results = ldap_query(connection, basedn,ldap_filter)
     host_list = parse_computers(results)
     print(f"[+] Found {len(host_list)} computers!")
+    if arguments.outputcomputers:
+        print(f"[+] Writing computers to file")
+        computers_file = open_output_file(arguments.outputcomputers, "computers output")
+        if computers_file is None:
+            return
+        computers_file.writelines(item + '\n' for item in host_list)
+        computers_file.close()
+
     for host in host_list:
         ip = resolve_hostname(dc_ip,host,domain)
         if ip != None:
@@ -195,7 +218,7 @@ def main():
             connection = connect_smb(ip,username,password,domain)
             if connection != None:
                 share_list = get_smb_share_list(connection)
-                traverse_shares(share_list,connection,keywords,outputFile)
+                traverse_shares(share_list,connection,keywords,output_file)
         if delay > 0:
             print(f"[+] {delay} seconds delay between servers...")
             time.sleep(delay)
