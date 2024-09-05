@@ -140,7 +140,7 @@ def recurse_share(con,sharename,directory,keywords,host):
             try:
                 if i.is_directory() and i.get_longname() != "." and i.get_longname() != "..":
                     new_dir = directory[:-1]
-                    recurse_share(con,sharename,directory[:-1]+i.get_longname()+"/*",keywords,output)
+                    recurse_share(con,sharename,directory[:-1]+i.get_longname()+"/*",keywords,host)
                 elif not i.is_directory():
                     if eval_filename(i.get_longname(),keywords):
                         full_path = f"//{con.getRemoteHost()}/{sharename}/{directory[:-1]}{i.get_longname()}"
@@ -245,6 +245,12 @@ def main():
     global finished_hosts_output_file
     global output_dir
     global lock
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Setup the logging facility
+    format = "%(asctime)s: %(message)s"
+    logging.basicConfig(format=format, level=logging.INFO, datefmt="%FT%H:%M:%S")
     
     dc_ip = arguments.dc_ip
     username = arguments.username
@@ -255,12 +261,6 @@ def main():
     keywords = parse_search_list(arguments.search)
     exclude_hosts = ""
     finished_hosts_output_file = None
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    # Setup the logging facility
-    format = "%(asctime)s: %(message)s"
-    logging.basicConfig(format=format, level=logging.DEBUG, datefmt="%FT%H:%M:%S")
     
     if len(keywords) == 0:
         logging.info("[-] Empty list of searchterms or unable to read searchterm file")
