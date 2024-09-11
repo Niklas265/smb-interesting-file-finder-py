@@ -231,8 +231,8 @@ def main():
     authgroup.add_argument('-H',"--hashes", action='store',type=str, help='NTLM hashes, format is LMHASH:NTHASH')
     parser.add_argument('-d',"--domain", action='store', type=str, help='FQDN of the domain', required=True)
     parser.add_argument('-s',"--search", action='store', type=str, help='Path to file with searchterms', required=True)
-
     parser.add_argument('-f','--filter', action='store', type=str, help="Regex LDAP-Filter for specific computer objects, such as *dc*", required=False)
+    parser.add_argument('-S',"--ldaps", action='store_true', default=False, help="Use LDAPS")
     parser.add_argument('-o','--output-dir', action='store', type=str, help="Output directory: One file per host will be written", required=False)
     parser.add_argument('-l','--output-hosts', action='store', type=str, help="Write the queried hosts from LDAP to file", required=False)
     parser.add_argument('-w','--delay', action='store', type=int, help="Delay between SMB-Servers", required=False)
@@ -280,6 +280,7 @@ def main():
     exclude_hosts = ""
     finished_hosts_output_file = None
     auth_type = None
+
     
     if password != None:
         auth_type = 'pass'
@@ -295,7 +296,12 @@ def main():
     if arguments.hosts:
         host_list = get_hosts_from_file(arguments.hosts)
     else:
-        connection = connect_ldap(f"ldap://{dc_ip}",username,password,domain,basedn)
+        
+        ldap_connect_string = f"ldap://{dc_ip}"
+        if arguments.ldaps == True:
+            ldap_connect_string = f"ldaps://{dc_ip}"
+        print(ldap_connect_string)
+        connection = connect_ldap(ldap_connect_string,username,password,domain,basedn)
         if not connection:
             return
 
