@@ -123,16 +123,14 @@ def get_smb_share_list(con):
     return ret
 
 def eval_filename(filename,keywords):
+    fn = filename.rstrip().lstrip().replace("+", "").replace("=", "").replace(".", "").replace("\\", "").replace(" ", "").replace("-", "").replace("_", "").lower().encode('utf-8')
     for i in keywords:
-        #fn = re.sub(r"[ -_|/+=]", "", filename).lower().encode('utf-8')
-        #fn = filename.lower().encode('utf-8')
-        fn = filename.rstrip().lstrip().replace("+", "").replace("=", "").replace(".", "").replace("\\", "").replace(" ", "").replace("-", "").replace("_", "").lower().encode('utf-8')
         if i in fn:
             logging.debug(i)
             return True
     return False
 
-def recurse_share(con,sharename,directory,keywords,host):
+def recurse_share(con,sharename,directory,keywords,host,output):
     try:
         output = open_output_file(host, "output")
         files = con.listPath(sharename,directory)
@@ -140,12 +138,12 @@ def recurse_share(con,sharename,directory,keywords,host):
             try:
                 if i.is_directory() and i.get_longname() != "." and i.get_longname() != "..":
                     new_dir = directory[:-1]
-                    recurse_share(con,sharename,directory[:-1]+i.get_longname()+"/*",keywords,host)
+                    recurse_share(con,sharename,directory[:-1]+i.get_longname()+"/*",keywords,host,output)
                 elif not i.is_directory():
                     if eval_filename(i.get_longname(),keywords):
                         full_path = f"//{con.getRemoteHost()}/{sharename}/{directory[:-1]}{i.get_longname()}"
                         full_path = full_path.replace("/", "\\")
-                        logging.info("%s\t%s", host,full_path)
+                        logging.info("%s\t%s", host, full_path)
                         if output != None:
                             output.write(f"{full_path}\n")
                             output.flush()
@@ -153,8 +151,6 @@ def recurse_share(con,sharename,directory,keywords,host):
                 pass
     except smb.SessionError as e:
         logging.info(e)
-        output.close()
-    output.close()
 
 def write_finished_host(host, ip):
     if finished_hosts_output_file != None:
@@ -164,18 +160,15 @@ def write_finished_host(host, ip):
 
 def traverse_shares(share_list,con,keywords,host):
     # Iterate over all shares but skip uninteresting shares like admin$, ipc$ and sysvol
-    for share in share_list:
-        if share.lower() != 'admin$' and share.lower() != 'sysvol' and share.lower() != 'ipc$':
-            try:
-                logging.info(f"[+] {host}: Searching Share {share}...")
-                #shell = MiniImpacketShell(con)
-                #shell.onecmd(f"use {share}")
-                #shell.onecmd("ls")
-                #continue
-                share_con = con.connectTree(share)
-                recurse_share(con,str(share),"*",keywords,host)
-            except:
-                logging.info("[-] %s: Error while accessing share (e.g. insufficient permissions)", host)
+    with open_output_file(host, "output") as output:
+        for share in share_list:
+            if share.lower() != 'admin$' and share.lower() != 'sysvol' and share.lower() != 'ipc$':
+                try:
+                    logging.info(f"[+] {host}: Searching Share {share}...")
+                    share_con = con.connectTree(share)
+                    recurse_share(con,str(share),"*",keywords,host,output)
+                except:
+                    logging.info("[-] %s: Error while accessing share (e.g. insufficient permissions)", host)
 
 def get_hosts_from_file(filename):
     ret = []
@@ -189,13 +182,11 @@ def get_hosts_from_file(filename):
 # As this function is called from the multithreading ".map()" library function
 # we can't do the delay outside of the function
 def search_host(host):
-    ip = resolve_hostname(dc_ip,host,domain)
-    
-    logging.info("[+] Next host: " + host + "  " + str(ip))
-    if str(ip) in exclude_hosts or str(host) in exclude_hosts:
+    if str(host) in exclude_hosts:
         logging.info("[+] host is excluded")
         return
-    
+
+    ip = resolve_hostname(dc_ip,host,domain)
     if ip != None:
         logging.info(f"[+] {host}: START")
         connection = connect_smb(ip,username,password,domain)
@@ -203,17 +194,17 @@ def search_host(host):
             share_list = get_smb_share_list(connection)
             traverse_shares(share_list,connection,keywords,host)
     else:
-        if delay > 0:
-            logging.info(f"[+] {delay} seconds delay between servers...")
-            time.sleep(delay)
         return
+
     try:
         write_finished_host(host, ip)
     except Exception as e:
         logging.info("WRITING HOST DIDN'T WORK: %s", e)
+
     if delay > 0:
         logging.info(f"[+] {delay} seconds delay between servers...")
         time.sleep(delay)
+
     logging.info("[+] %s: END", host)
 
 def main():
@@ -225,13 +216,13 @@ def main():
     parser.add_argument('-s',"--search", action='store', type=str, help='Path to file with searchterms', required=True)
 
     parser.add_argument('-f','--filter', action='store', type=str, help="Regex LDAP-Filter for specific computer objects, such as *dc*", required=False)
-    parser.add_argument('-o','--output_dir', action='store', type=str, help="Output directory: One file per host will be written", required=False)
-    parser.add_argument('-c','--output_hosts', action='store', type=str, help="Output file to write all retrieved computers are being searched", required=False)
-    parser.add_argument('-t','--delay', action='store', type=int, help="Delay between SMB-Servers, required=false")
-    parser.add_argument('-l','--hosts', action='store', type=str, help="Use hosts file instead of querying LDAP")
-    parser.add_argument('-r','--exclude_hosts', action='store', type=str, help="File with IP adresses that should be excluded")
-    parser.add_argument('-w','--finished_hosts', action='store', type=str, help="File with host names and IP address of which the search has finished. This can be the same as -r (--exclude_hosts).")
-    parser.add_argument('-x','--number_threads', action='store', type=int, help="Number of threads: Default is 5")
+    parser.add_argument('-o','--output-dir', action='store', type=str, help="Output directory: One file per host will be written", required=False)
+    parser.add_argument('-l','--output-hosts', action='store', type=str, help="Write the queried hosts from LDAP to file", required=False)
+    parser.add_argument('-w','--delay', action='store', type=int, help="Delay between SMB-Servers", required=False)
+    parser.add_argument('-r','--hosts', action='store', type=str, help="Use hosts file instead of querying LDAP", required=False)
+    parser.add_argument('-x','--exclude-hosts', action='store', type=str, help="File with hosts that should be excluded", required=False)
+    parser.add_argument('-z','--finished-hosts', action='store', type=str, help="Write finished hosts and their IP address to file; this can be the same as -x (--exclude-hosts)", required=False)
+    parser.add_argument('-t','--number-threads', action='store', type=int, help="Number of threads: Default is 5", required=False)
     arguments = parser.parse_args()
     
     global dc_ip
