@@ -7,7 +7,6 @@ import signal
 import threading
 import time
 from nslookup import Nslookup
-from impacket.examples.smbclient import MiniImpacketShell
 from impacket.ldap.ldap import LDAPConnection
 from impacket.ldap.ldap import LDAPSessionError
 from impacket.ldap.ldapasn1 import SearchResultEntry
@@ -21,6 +20,9 @@ from impacket.smbconnection import SMB2_DIALECT_002
 dc_ip = None
 username = None
 password = None
+hashes = None
+lmhash = None
+nthash = None
 domain = None
 basedn = None
 delay = None
@@ -29,6 +31,7 @@ exclude_hosts = None
 finished_hosts_output_file = None
 output_dir = None
 lock = None
+auth_type = None
 
 # This is intentional a HARD FORCED QUIT
 # As a soft quit somehow takes ages and doesn't really work
@@ -68,7 +71,13 @@ def open_output_file(path:str, output_type:str):
 def connect_ldap(ldapServer: str, user: str,password: str, domain: str, base_dn:str):
     try:
         ldap_con = LDAPConnection(ldapServer,baseDN=base_dn)
-        ldap_con.login(user,password,domain,'','')
+        if auth_type == 'pass':
+            ldap_con.login(user,password,domain,'','')
+        elif auth_type == 'pth':
+            ldap_con.login(user,'',domain,lmhash,nthash)
+        else:
+            logging.info('[-] Corrupt Auth Type')
+            os.exit(-1)
         logging.info(f'[+] Successfull LDAP bind!')
         return ldap_con
     except OSError:
@@ -106,7 +115,12 @@ def resolve_hostname(dns_server: str,host: str, domain: str):
 def connect_smb(ip:str,username:str,password:str,domain:str):
     try:
         smbClient = SMBConnection(ip,ip,sess_port=445,preferredDialect=None, timeout=10)
-        smbClient.login(username,password,domain,'','')
+        if auth_type == 'pass':
+            smbClient.login(username,password,domain,'','')
+        elif auth_type == 'pth':
+            smbClient.login(username,'',domain,lmhash,nthash)
+        else:
+            logging.info("[-] Corrupt Auth Type")
         return smbClient
     except:
         logging.info("[-] %s: Connection Error: %s", host, str(ip))
@@ -209,9 +223,12 @@ def search_host(host):
 
 def main():
     parser = argparse.ArgumentParser(description="Tool to find interesting files, that are accessible on shares inside a domain")
+    authgroup = parser.add_mutually_exclusive_group(required=True)
+
     parser.add_argument('-n','--dc-ip', action='store', type=str, help='IP of Domain Controller', required=True)
     parser.add_argument('-u',"--username", action='store', type=str, help='Username', required=True)
-    parser.add_argument('-p',"--password", action='store', type=str, help='Password', required=True)
+    authgroup.add_argument('-p',"--password", action='store', type=str, help='Password')
+    authgroup.add_argument('-H',"--hashes", action='store',type=str, help='NTLM hashes, format is LMHASH:NTHASH')
     parser.add_argument('-d',"--domain", action='store', type=str, help='FQDN of the domain', required=True)
     parser.add_argument('-s',"--search", action='store', type=str, help='Path to file with searchterms', required=True)
 
@@ -223,11 +240,18 @@ def main():
     parser.add_argument('-x','--exclude-hosts', action='store', type=str, help="File with hosts that should be excluded", required=False)
     parser.add_argument('-z','--finished-hosts', action='store', type=str, help="Write finished hosts and their IP address to file; this can be the same as -x (--exclude-hosts)", required=False)
     parser.add_argument('-t','--number-threads', action='store', type=int, help="Number of threads: Default is 5", required=False)
+    
+
+
     arguments = parser.parse_args()
     
     global dc_ip
     global username
     global password
+    global hashes
+    global lmhash
+    global nthash
+    global auth_type
     global domain
     global basedn
     global delay
@@ -246,13 +270,22 @@ def main():
     dc_ip = arguments.dc_ip
     username = arguments.username
     password = arguments.password
+    hashes = arguments.hashes
+    if arguments.hashes is not None:
+        lmhash,nthash = hashes.split(':')
     domain = arguments.domain
     basedn = parse_dn(domain)
     delay = -1
     keywords = parse_search_list(arguments.search)
     exclude_hosts = ""
     finished_hosts_output_file = None
+    auth_type = None
     
+    if password != None:
+        auth_type = 'pass'
+    elif hashes != None:
+        auth_type = 'pth'
+
     if len(keywords) == 0:
         logging.info("[-] Empty list of searchterms or unable to read searchterm file")
         return
