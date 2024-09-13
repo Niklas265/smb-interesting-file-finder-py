@@ -6,6 +6,7 @@ import os
 import signal
 import threading
 import time
+import socket
 from nslookup import Nslookup
 from impacket.ldap.ldap import LDAPConnection
 from impacket.ldap.ldap import LDAPSessionError
@@ -18,6 +19,7 @@ from impacket.smbconnection import SMB2_DIALECT_002
 # These are all variables that the threads need.
 # Easy solution to just make them global, as the threads only read these variables.
 dc_ip = None
+dc_fqdn = None
 username = None
 password = None
 hashes = None
@@ -75,6 +77,10 @@ def connect_ldap(ldapServer: str, user: str,password: str, domain: str, base_dn:
             ldap_con.login(user,password,domain,'','')
         elif auth_type == 'pth':
             ldap_con.login(user,'',domain,lmhash,nthash)
+        elif auth_type == 'kerberos-pass':
+            ldap_con.kerberosLogin(user,password,domain,'','',None,dc_ip)
+        elif auth_type == 'kerberos-pth':
+            ldap_con.kerberosLogin(user,password,domain,lmhash,nthash,None,dc_ip)
         else:
             logging.info('[-] Corrupt Auth Type')
             os.exit(-1)
@@ -112,18 +118,22 @@ def resolve_hostname(dns_server: str,host: str, domain: str):
     else:
         return None
 
-def connect_smb(ip:str,username:str,password:str,domain:str):
+def connect_smb(connection_dest:str,username:str,password:str,domain:str):
     try:
-        smbClient = SMBConnection(ip,ip,sess_port=445,preferredDialect=None, timeout=10)
+        smbClient = SMBConnection(connection_dest,connection_dest,sess_port=445,preferredDialect=None, timeout=10)
         if auth_type == 'pass':
             smbClient.login(username,password,domain,'','')
         elif auth_type == 'pth':
             smbClient.login(username,'',domain,lmhash,nthash)
+        elif auth_type == 'kerberos-pass':
+            smbClient.kerberosLogin(username,password,domain,'','','', dc_ip)
+        elif auth_type == 'kerberos-pth':
+            smbClient.kerberosLogin(username,'',domain,lmhash,nthash,'',dc_ip)
         else:
             logging.info("[-] Corrupt Auth Type")
         return smbClient
     except:
-        logging.info("[-] %s: Connection Error: %s", host, str(ip))
+        logging.info("[-] %s: Connection Error: %s", host, str(connection_dest))
         return None
 
 def get_smb_share_list(con):
@@ -203,7 +213,10 @@ def search_host(host):
     ip = resolve_hostname(dc_ip,host,domain)
     if ip != None:
         logging.info(f"[+] {host}: START")
-        connection = connect_smb(ip,username,password,domain)
+        smb_connection_destination = ip
+        if 'kerberos' in auth_type:
+            smb_connection_destination = host
+        connection = connect_smb(smb_connection_destination,username,password,domain)
         if connection != None:
             share_list = get_smb_share_list(connection)
             traverse_shares(share_list,connection,keywords,host)
@@ -230,6 +243,7 @@ def main():
     authgroup.add_argument('-p',"--password", action='store', type=str, help='Password')
     authgroup.add_argument('-H',"--hashes", action='store',type=str, help='NTLM hashes, format is LMHASH:NTHASH')
     parser.add_argument('-d',"--domain", action='store', type=str, help='FQDN of the domain', required=True)
+    parser.add_argument('-k','--kerberos', action='store_true', default=False, help='Use Kerberos authentication instead of NTLM', required=False)
     parser.add_argument('-s',"--search", action='store', type=str, help='Path to file with searchterms', required=True)
     parser.add_argument('-f','--filter', action='store', type=str, help="Regex LDAP-Filter for specific computer objects, such as *dc*", required=False)
     parser.add_argument('-S',"--ldaps", action='store_true', default=False, help="Use LDAPS")
@@ -241,11 +255,10 @@ def main():
     parser.add_argument('-z','--finished-hosts', action='store', type=str, help="Write finished hosts and their IP address to file; this can be the same as -x (--exclude-hosts)", required=False)
     parser.add_argument('-t','--number-threads', action='store', type=int, help="Number of threads: Default is 5", required=False)
     
-
-
     arguments = parser.parse_args()
     
     global dc_ip
+    global dc_fqdn
     global username
     global password
     global hashes
@@ -280,12 +293,19 @@ def main():
     exclude_hosts = ""
     finished_hosts_output_file = None
     auth_type = None
+    kerberos = arguments.kerberos
 
+    dc_connection = dc_ip
     
     if password != None:
         auth_type = 'pass'
     elif hashes != None:
         auth_type = 'pth'
+
+    if kerberos:
+        auth_type = 'kerberos-' + auth_type
+        dc_fqdn = socket.getnameinfo((dc_ip,0),0)[0]
+        dc_connection = dc_fqdn
 
     if len(keywords) == 0:
         logging.info("[-] Empty list of searchterms or unable to read searchterm file")
@@ -297,10 +317,9 @@ def main():
         host_list = get_hosts_from_file(arguments.hosts)
     else:
         
-        ldap_connect_string = f"ldap://{dc_ip}"
+        ldap_connect_string = f"ldap://{dc_connection}"
         if arguments.ldaps == True:
-            ldap_connect_string = f"ldaps://{dc_ip}"
-        print(ldap_connect_string)
+            ldap_connect_string = f"ldaps://{dc_connection}"
         connection = connect_ldap(ldap_connect_string,username,password,domain,basedn)
         if not connection:
             return
