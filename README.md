@@ -4,7 +4,8 @@ Python AD enumeration tool to find accessible files with interesting keywords in
 Inspired by Find-InterestingDomainShareFiles from PowerView
 ```
 $ python smbinterestingfilefinder.py -h                                                                                                                                                                                                  
-usage: smbinterestingfilefinder.py [-h] -n DC_IP -u USERNAME (-p PASSWORD | -H HASHES) -d DOMAIN -s SEARCH [-f FILTER] [-S] [-o OUTPUT_DIR] [-l OUTPUT_HOSTS] [-w DELAY] [-r HOSTS] [-x EXCLUDE_HOSTS] [-z FINISHED_HOSTS] [-t NUMBER_THREADS]
+usage: smbinterestingfilefinder.py [-h] -n DC_IP -u USERNAME (-p PASSWORD | -H HASHES) -d DOMAIN [-k] -s SEARCH [-f FILTER] [-S] [-o OUTPUT_DIR] [-l OUTPUT_HOSTS] [-w DELAY] [-r HOSTS] [-x EXCLUDE_HOSTS] [-z FINISHED_HOSTS]
+                                   [-t NUMBER_THREADS]
 
 Tool to find interesting files, that are accessible on shares inside a domain
 
@@ -20,6 +21,7 @@ options:
                         NTLM hashes, format is LMHASH:NTHASH
   -d DOMAIN, --domain DOMAIN
                         FQDN of the domain
+  -k, --kerberos        Use Kerberos authentication instead of NTLM
   -s SEARCH, --search SEARCH
                         Path to file with searchterms
   -f FILTER, --filter FILTER
@@ -39,6 +41,4 @@ options:
                         Write finished hosts and their IP address to file; this can be the same as -x (--exclude-hosts)
   -t NUMBER_THREADS, --number-threads NUMBER_THREADS
                         Number of threads: Default is 5
-
-
 ```
