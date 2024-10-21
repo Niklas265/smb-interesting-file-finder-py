@@ -5,7 +5,7 @@ Inspired by Find-InterestingDomainShareFiles from PowerView
 ```
 $ python smbinterestingfilefinder.py -h                                                                                                                                                                                                  
 usage: smbinterestingfilefinder.py [-h] -n DC_IP -u USERNAME (-p PASSWORD | -H HASHES) -d DOMAIN [-k] -s SEARCH [-f FILTER] [-S] [-o OUTPUT_DIR] [-l OUTPUT_HOSTS] [-w DELAY] [-r HOSTS] [-x EXCLUDE_HOSTS] [-z FINISHED_HOSTS]
-                                   [-t NUMBER_THREADS]
+                                   [-t NUMBER_THREADS] [-X EXCLUDE_SHARES]
 
 Tool to find interesting files, that are accessible on shares inside a domain
 
@@ -41,4 +41,6 @@ options:
                         Write finished hosts and their IP address to file; this can be the same as -x (--exclude-hosts)
   -t NUMBER_THREADS, --number-threads NUMBER_THREADS
                         Number of threads: Default is 5
+  -X EXCLUDE_SHARES, --exclude-shares EXCLUDE_SHARES
+                        Comma-separated list of case-insensitives sharenames, e.g. c$, always skips admin$, ipc$ and sysvol
 ```
