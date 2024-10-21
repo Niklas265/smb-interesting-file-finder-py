@@ -34,6 +34,7 @@ finished_hosts_output_file = None
 output_dir = None
 lock = None
 auth_type = None
+excluded_shares = ['admin$','ipc$','sysvol']
 
 # This is intentional a HARD FORCED QUIT
 # As a soft quit somehow takes ages and doesn't really work
@@ -184,15 +185,18 @@ def write_finished_host(host, ip):
 
 def traverse_shares(share_list,con,keywords,host):
     # Iterate over all shares but skip uninteresting shares like admin$, ipc$ and sysvol
-    with open_output_file(host, "output") as output:
-        for share in share_list:
-            if share.lower() != 'admin$' and share.lower() != 'sysvol' and share.lower() != 'ipc$':
-                try:
-                    logging.info(f"[+] {host}: Searching Share {share}...")
-                    share_con = con.connectTree(share)
-                    recurse_share(con,str(share),"*",keywords,host,output)
-                except:
-                    logging.info("[-] %s: Error while accessing share (e.g. insufficient permissions)", host)
+    try:
+        with open_output_file(host, "output") as output:
+            for share in share_list:
+                if not share.lower() in excluded_shares:
+                    try:
+                        logging.info(f"[+] {host}: Searching Share {share}...")
+                        share_con = con.connectTree(share)
+                        recurse_share(con,str(share),"*",keywords,host,output)
+                    except:
+                        logging.info("[-] %s: Error while accessing share (e.g. insufficient permissions)", host)
+    except:
+        logging.info("[-] Error: Unable to access output directory")
 
 def get_hosts_from_file(filename):
     ret = []
@@ -254,7 +258,8 @@ def main():
     parser.add_argument('-x','--exclude-hosts', action='store', type=str, help="File with hosts that should be excluded", required=False)
     parser.add_argument('-z','--finished-hosts', action='store', type=str, help="Write finished hosts and their IP address to file; this can be the same as -x (--exclude-hosts)", required=False)
     parser.add_argument('-t','--number-threads', action='store', type=int, help="Number of threads: Default is 5", required=False)
-    
+    parser.add_argument('-X','--exclude-shares',action='store',type=str, help='Comma-separated list of case-insensitives sharenames, e.g. c$, always skips admin$, ipc$ and sysvol')
+
     arguments = parser.parse_args()
     
     global dc_ip
@@ -273,6 +278,7 @@ def main():
     global finished_hosts_output_file
     global output_dir
     global lock
+    global excluded_shares
 
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -310,6 +316,10 @@ def main():
     if len(keywords) == 0:
         logging.info("[-] Empty list of searchterms or unable to read searchterm file")
         return
+
+    if arguments.exclude_shares != None:
+        for share in arguments.exclude_shares.split(','):
+            excluded_shares.append(share.lower())
 
     # TODO: should probably move the logic to a function
     host_list = []
